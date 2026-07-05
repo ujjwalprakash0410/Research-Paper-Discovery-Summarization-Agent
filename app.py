@@ -1,103 +1,239 @@
-from graph import graph
-from langgraph.types import Command
+import streamlit as st
+import requests
 
-config = {
-    "configurable": {
-        "thread_id": "research-session-1"
-    }
-}
+API_URL = "http://localhost:8000"
 
-initial_state = {
-    "query": "Large Language Models",
-
-    "papers": [],
-    "selected_index": None,
-    "selected_paper": None,
-
-    "summary": "",
-
-    "vector_store_path": "",
-
-    "messages": [],
-
-    "qa_query": "What personality traits were evaluated?",
-
-    "answer": ""
-}
-
-print("=" * 80)
-print("STEP 1 : SEARCH")
-print("=" * 80)
-
-result = graph.invoke(
-    initial_state,
-    config=config
+st.set_page_config(
+    page_title="Research Paper Discovery & Summarization Agent",
+    page_icon="📚",
+    layout="wide",
 )
 
-# Graph pauses at first interrupt
-print(result)
+st.title("📚 Research Paper Discovery & Summarization Agent")
 
-print("\n")
+# ------------------------
+# Session State
+# ------------------------
 
-paper_number = input("Select paper number: ")
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = None
 
-print("\n")
-print("=" * 80)
-print("STEP 2 : PROCESS PAPER")
-print("=" * 80)
+if "papers" not in st.session_state:
+    st.session_state.papers = []
 
-result = graph.invoke(
-    Command(resume=paper_number),
-    config=config
+if "summary" not in st.session_state:
+    st.session_state.summary = ""
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# ------------------------
+# Sidebar
+# ------------------------
+
+with st.sidebar:
+
+    st.title("Research Agent")
+
+    st.markdown("---")
+
+    if st.button("📚 Refresh Library"):
+
+        response = requests.get(
+            f"{API_URL}/library"
+        )
+
+        library = response.json()
+
+        if not library:
+            st.info("Library is empty.")
+
+        else:
+
+            st.success(f"{len(library)} saved papers")
+
+            for paper in library:
+
+                with st.expander(paper["title"]):
+
+                    st.write("### Authors")
+                    st.write(", ".join(paper["authors"]))
+
+                    st.write("### Summary")
+                    st.write(paper["summary"])
+
+                    st.link_button(
+                        "Open PDF",
+                        paper["pdf_url"]
+                    )
+
+# ------------------------
+# Search
+# ------------------------
+
+st.header("🔍 Search Papers")
+
+query = st.text_input(
+    "Research Topic",
+    placeholder="Large Language Models"
 )
 
-print("\n")
-print("=" * 80)
-print("SUMMARY")
-print("=" * 80)
+if st.button("Search"):
 
-print(result["summary"])
+    st.session_state.summary = ""
+    st.session_state.chat_history = []
 
-print("\n")
-print("=" * 80)
-print("QA ANSWER")
-print("=" * 80)
+    with st.spinner("Searching papers..."):
 
-print(result["answer"])
+        response = requests.post(
+            f"{API_URL}/search",
+            json={
+                "query": query
+            }
+        )
 
-print("\n")
-print("=" * 80)
-print("SOURCES")
-print("=" * 80)
+        data = response.json()
 
-for source in result["messages"]:
-    print(f"Page {source['page']}")
-    print(source["content"])
-    print("-" * 80)
+        st.session_state.thread_id = data["thread_id"]
+        st.session_state.papers = data["papers"]
 
-print("\n")
+        st.success(f"Found {len(data['papers'])} papers.")
 
-save_choice = input("Save this paper? (yes/no): ")
+# ------------------------
+# Paper Selection
+# ------------------------
 
-print("\n")
-print("=" * 80)
-print("STEP 3 : SAVE")
-print("=" * 80)
+if st.session_state.papers:
 
-result = graph.invoke(
-    Command(resume=save_choice),
-    config=config
-)
+    titles = [
+        paper["title"]
+        for paper in st.session_state.papers
+    ]
 
-print("\n")
+    selected = st.selectbox(
+        "Choose a paper",
+        titles
+    )
 
-if save_choice.lower() == "yes":
-    print("✅ Paper saved successfully.")
-else:
-    print("❌ Paper not saved.")
+    selected_paper = st.session_state.papers[
+        titles.index(selected)
+    ]
 
-print("\n")
+    with st.expander("Paper Details"):
 
-print("=" * 80)
-print("WORKFLOW COMPLETE")
-print("=" * 80)
+        st.write("### Authors")
+        st.write(", ".join(selected_paper["authors"]))
+
+        st.write("### Published")
+        st.write(selected_paper["published"])
+
+        st.write("### Abstract")
+        st.write(selected_paper["abstract"])
+
+    if st.button("Generate Summary"):
+
+        with st.spinner("Reading paper..."):
+
+            response = requests.post(
+                f"{API_URL}/approve",
+                json={
+                    "thread_id": st.session_state.thread_id,
+                    "paper_number": titles.index(selected) + 1,
+                },
+            )
+
+            result = response.json()
+
+            st.session_state.summary = result["summary"]
+
+# ------------------------
+# Summary
+# ------------------------
+
+if st.session_state.summary:
+
+    st.header("📝 Paper Summary")
+
+    st.markdown(st.session_state.summary)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        if st.button("💾 Save Paper"):
+
+            requests.post(
+                f"{API_URL}/save",
+                json={
+                    "thread_id": st.session_state.thread_id,
+                    "decision": "yes",
+                },
+            )
+
+            st.success("Paper saved!")
+
+    with col2:
+
+        if st.button("❌ Don't Save"):
+
+            requests.post(
+                f"{API_URL}/save",
+                json={
+                    "thread_id": st.session_state.thread_id,
+                    "decision": "no",
+                },
+            )
+
+# ------------------------
+# Chat
+# ------------------------
+
+if st.session_state.summary:
+
+    st.header("💬 Chat with the Paper")
+
+    for message in st.session_state.chat_history:
+
+        with st.chat_message(message["role"]):
+
+            st.markdown(message["content"])
+
+    prompt = st.chat_input(
+        "Ask anything about this paper..."
+    )
+
+    if prompt:
+
+        st.session_state.chat_history.append(
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        )
+
+        with st.chat_message("user"):
+
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+
+            with st.spinner("Thinking..."):
+
+                response = requests.post(
+                    f"{API_URL}/chat",
+                    json={
+                        "thread_id": st.session_state.thread_id,
+                        "question": prompt,
+                    },
+                )
+
+                answer = response.json()["answer"]
+
+                st.markdown(answer)
+
+        st.session_state.chat_history.append(
+            {
+                "role": "assistant",
+                "content": answer,
+            }
+        )

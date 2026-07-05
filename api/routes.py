@@ -1,16 +1,22 @@
 import uuid
 
 from fastapi import APIRouter
-from langgraph.types import Command
 from fastapi.responses import StreamingResponse
-from agents.summarizer import stream_summary
+from langgraph.types import Command
 
+from agents.qa import answer_question
+from agents.summarizer import stream_summary
 from graph import graph
+from memory.session_store import (
+    save_session,
+    get_vector_store,
+)
 from memory.store import MemoryStore
 from models import (
     SearchRequest,
     ApproveRequest,
     SaveRequest,
+    AskRequest,
 )
 
 router = APIRouter()
@@ -78,11 +84,38 @@ def approve(request: ApproveRequest):
         config=config
     )
 
+    save_session(
+        request.thread_id,
+        result["vector_store_path"]
+    )
+
     return {
         "summary": result["summary"],
         "answer": result["answer"],
         "sources": result["messages"]
     }
+
+
+@router.post("/chat")
+def chat(request: AskRequest):
+
+    vector_store = get_vector_store(
+        request.thread_id
+    )
+
+    if vector_store is None:
+        return {
+            "error": "Session expired."
+        }
+
+    result = answer_question(
+        request.thread_id,
+        vector_store,
+        request.question,
+    )
+
+    return result
+
 
 @router.post("/save")
 def save(request: SaveRequest):
@@ -110,6 +143,7 @@ def library():
 
     return store.get_library()
 
+
 @router.get("/stream-summary")
 def stream_summary_api():
 
@@ -122,6 +156,7 @@ def stream_summary_api():
         generator,
         media_type="text/plain"
     )
+
 
 @router.get("/health")
 def health():
