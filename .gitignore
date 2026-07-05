@@ -1,0 +1,39 @@
+# Virtual Environment
+.venv/
+
+# Environment Variables
+.env
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VS Code
+.vscode/
+
+# Logs
+*.log
+
+# Papers downloaded
+papers/
+
+# FAISS Vector Store
+vectorstore/
+
+# Local Library
+library.json
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Pytest
+.pytest_cache/
+
+# Mypy
+.mypy_cache/
+
+# Egg files
+*.egg-info/
